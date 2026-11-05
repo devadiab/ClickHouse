@@ -97,6 +97,13 @@ public:
     };
     MetadataStorageProperties getMetadataStorageProperties();
 
+#if CLICKHOUSE_CLOUD && USE_SSL
+    /// Describes the key of the metadata storage, which must be encrypted (see
+    /// `MetadataStorageProperties::is_encrypted`), see
+    /// NamedCollectionsMetadataStorage::getEncryptionKeyInfo.
+    NamedCollectionsEncryptionKeyInfo getEncryptionKeyInfo();
+#endif
+
     /// Stored bytes of the SQL-created collections, exactly as the metadata storage holds them,
     /// keyed by the collection name. Never decrypts anything.
     std::map<std::string, std::string> getRawEntriesForBackup();
