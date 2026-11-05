@@ -1,0 +1,3 @@
+# Build output (murasil/build/builder-droplet.sh writes the binary here).
+*
+!.gitignore

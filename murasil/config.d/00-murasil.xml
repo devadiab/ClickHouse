@@ -1,0 +1,17 @@
+<!-- Murasil server defaults. Loaded from config.d after upstream's config.xml, so
+     anything here overrides the stock value and nothing else changes. -->
+<clickhouse>
+    <!-- text_log keeps every server log line and processors_profile_log a row per
+         pipeline step of every query: on the live site they were gigabytes a day of
+         writes nobody read. query_log and part_log stay for diagnosis. -->
+    <text_log remove="remove"/>
+    <processors_profile_log remove="remove"/>
+
+    <!-- System log tables grow without limit by default. -->
+    <query_log><ttl>event_date + INTERVAL 14 DAY DELETE</ttl></query_log>
+    <part_log><ttl>event_date + INTERVAL 14 DAY DELETE</ttl></part_log>
+    <trace_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></trace_log>
+    <metric_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></metric_log>
+    <asynchronous_metric_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></asynchronous_metric_log>
+    <query_views_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></query_views_log>
+</clickhouse>
