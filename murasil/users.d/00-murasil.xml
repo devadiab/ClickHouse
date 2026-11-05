@@ -1,0 +1,17 @@
+<!-- Murasil defaults for every user profile. Loaded from users.d after upstream's
+     users.xml; the platform also sends these per connection, so an official image
+     behaves the same. -->
+<clickhouse>
+    <profiles>
+        <default>
+            <!-- The platform batches its own inserts (one WriteBuffer flush per table
+                 every few seconds). Server-side batching on top of that merged the
+                 inserts of many tenants into one block, which then spanned more
+                 partitions than allowed and failed them all. -->
+            <async_insert>0</async_insert>
+            <!-- Tables are partitioned per tenant and month, so one batch legitimately
+                 holds one partition per active tenant. -->
+            <max_partitions_per_insert_block>10000</max_partitions_per_insert_block>
+        </default>
+    </profiles>
+</clickhouse>

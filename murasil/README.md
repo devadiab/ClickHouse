@@ -24,6 +24,9 @@ is a one-line change of the base tag if a release misbehaves.
 
 - `config.d/` server configuration loaded after upstream's `config.xml`: the system
   logs Murasil does not read are off, the rest have retention.
+- `users.d/` profile defaults: no server-side insert batching, a partition cap that
+  fits one partition per tenant per batch.
+- `COMPATIBILITY.md` what moving the platform between ClickHouse versions turned up.
 - `build/` how the Linux binary is produced. A ClickHouse build needs 16+ cores and
   32+ GB of RAM, so it runs on a throwaway DigitalOcean droplet
   (`build/builder-droplet.sh`) inside upstream's own toolchain image for the same

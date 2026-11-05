@@ -32,6 +32,7 @@ RUN groupadd -r clickhouse --gid=101 \
 RUN mkdir /docker-entrypoint-initdb.d
 COPY docker/server/docker_related_config.xml /etc/clickhouse-server/config.d/
 COPY murasil/config.d/*.xml /etc/clickhouse-server/config.d/
+COPY murasil/users.d/*.xml /etc/clickhouse-server/users.d/
 COPY docker/server/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
