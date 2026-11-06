@@ -83,7 +83,9 @@ docker run --rm -v /src:/src -w /src murasil/ch-toolchain bash -euxc "
         -DCMAKE_TOOLCHAIN_FILE=/src/cmake/linux/toolchain-x86_64.cmake \
         -DENABLE_TESTS=0 -DENABLE_UTILS=0 -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON \
         -S /src -B /src/build
-  ninja -C /src/build clickhouse-bundle
+  # The target is the executable itself: upstream's clickhouse-bundle only gathers the
+  # self-extracting wrapper and the standalone keeper, neither of which this build makes.
+  ninja -C /src/build clickhouse
   /src/build/programs/clickhouse --version
 "
 ls -la /src/build/programs/ | head -20
