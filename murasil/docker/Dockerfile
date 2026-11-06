@@ -4,7 +4,9 @@
 #
 #   murasil/docker/build.sh            after murasil/build/builder-droplet.sh
 #
-# Build context is the repository root.
+# Build context is murasil/out/context, which build.sh stages: the binary, upstream's
+# entrypoint and docker config, and Murasil's config.d / users.d. The repository
+# itself (1.6 GB of sources) never enters the context.
 FROM ubuntu:22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -19,7 +21,7 @@ RUN apt-get update \
 # The single static binary carries server, client, keeper and the tools;
 # `clickhouse install` lays out /etc, /var/lib and the symlinks the way the
 # packages do, so upstream's entrypoint works unchanged.
-COPY murasil/out/clickhouse /tmp/clickhouse
+COPY clickhouse /tmp/clickhouse
 RUN groupadd -r clickhouse --gid=101 \
     && useradd -r -g clickhouse --uid=101 --home-dir=/var/lib/clickhouse --shell=/bin/bash clickhouse \
     && chmod +x /tmp/clickhouse \
@@ -30,10 +32,10 @@ RUN groupadd -r clickhouse --gid=101 \
     && chmod ugo+Xrw -R /var/lib/clickhouse /var/log/clickhouse-server /etc/clickhouse-server /etc/clickhouse-client
 
 RUN mkdir /docker-entrypoint-initdb.d
-COPY docker/server/docker_related_config.xml /etc/clickhouse-server/config.d/
-COPY murasil/config.d/*.xml /etc/clickhouse-server/config.d/
-COPY murasil/users.d/*.xml /etc/clickhouse-server/users.d/
-COPY docker/server/entrypoint.sh /entrypoint.sh
+COPY docker_related_config.xml /etc/clickhouse-server/config.d/
+COPY config.d/*.xml /etc/clickhouse-server/config.d/
+COPY users.d/*.xml /etc/clickhouse-server/users.d/
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 9000 8123 9009

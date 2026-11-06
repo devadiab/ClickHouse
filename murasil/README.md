@@ -62,13 +62,25 @@ murasil/build/builder-droplet.sh
 
 ## Building
 
+The first build (2026-11-06) took 1 h 50 min on a c-32 droplet in ams3: ~12 min for the
+toolchain image, 17,482 ninja steps, a 5.6 GB binary with debug info that strips to
+0.9 GB. Three things upstream's tooling assumes that a plain droplet does not have, all
+handled by the script: BuildKit (`TARGETARCH`) for the toolchain image, the
+`clickhouse` target itself rather than `clickhouse-bundle` (empty without the
+self-extracting wrapper), and a public address that the API lists a little after
+`--wait` returns. The binary reports `26.10.2.1`; upstream stamps the release
+build number through its CI, which this build does not run.
+
+
 ```bash
 murasil/build/builder-droplet.sh            # the murasil branch
 murasil/build/builder-droplet.sh <ref>      # any tag or commit
 ```
 
-The binary lands in `murasil/out/clickhouse`; `murasil/docker/build.sh` turns it
-into the `murasil/clickhouse-server` image the platform's compose file runs.
+The stripped binary lands in `murasil/out/clickhouse`; `murasil/docker/build.sh`
+stages a small context (binary, upstream entrypoint, Murasil config) and builds the
+`murasil/clickhouse-server` image, which the platform's compose file can run in
+place of the official one.
 
 ---
 
