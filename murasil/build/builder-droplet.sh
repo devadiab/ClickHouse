@@ -57,6 +57,10 @@ set -euo pipefail
 repo=$1 ref=$2 thinlto=$3
 export DEBIAN_FRONTEND=noninteractive
 apt-get -qq update && apt-get -qq install -y docker.io git >/dev/null
+# BuildKit sets TARGETARCH on its own; the stock builder does not, and upstream's
+# Dockerfile picks its sccache download by it.
+apt-get -qq install -y docker-buildx >/dev/null 2>&1 || true
+export DOCKER_BUILDKIT=1
 # One tree is enough for a build; the history is not (a partial clone of this
 # repository from GitHub stalled at 8 GB). $ref is a branch or tag.
 git clone -q --depth 1 --branch "$ref" "$repo" /src
@@ -66,7 +70,7 @@ git log -1 --oneline
 
 # Upstream's own toolchain image for this exact source (clang, cmake, ninja, rust):
 # ci/docker/fasttest/Dockerfile is what their build jobs start from.
-docker build -q -t murasil/ch-toolchain -f ci/docker/fasttest/Dockerfile ci/docker/fasttest
+docker build -q -t murasil/ch-toolchain --build-arg TARGETARCH=amd64 -f ci/docker/fasttest/Dockerfile ci/docker/fasttest
 llvm=$(sed -n 's/.*LLVM_VERSION=\([0-9][0-9]*\).*/\1/p' ci/docker/fasttest/Dockerfile | head -1)
 
 # The configuration of upstream's "amd_binary" build (ci/jobs/build_clickhouse.py), minus
