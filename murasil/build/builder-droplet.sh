@@ -2,7 +2,7 @@
 # Builds the Murasil ClickHouse Linux binary on a throwaway DigitalOcean droplet.
 #
 #   murasil/build/builder-droplet.sh            build HEAD of the murasil branch
-#   murasil/build/builder-droplet.sh v26.10.2.103-stable  build a given ref
+#   murasil/build/builder-droplet.sh v26.10.2.103-stable  build a given branch or tag
 #
 # A ClickHouse build wants 16+ cores and 32+ GB of RAM: that is a c-32 droplet
 # (32 vCPU / 64 GB, about $1 an hour) for roughly 60-120 minutes, so a build costs a
@@ -15,11 +15,12 @@ set -euo pipefail
 REF="${1:-murasil}"
 REPO_URL="${MURASIL_CH_REPO:-$(git -C "$(dirname "$0")/../.." remote get-url origin)}"
 NAME="murasil-ch-builder-$(date +%Y%m%d%H%M)"
-REGION="${MURASIL_REGION:-fra1}"
+# The size is not offered in every region; the first region that takes it wins.
+REGIONS="${MURASIL_BUILDER_REGIONS:-fra1 ams3 lon1 nyc3}"
 SIZE="${MURASIL_BUILDER_SIZE:-c-32}"
 OUT="$(cd "$(dirname "$0")/.." && pwd)/out"
 SSH_KEY_FILE="${MURASIL_SSH_KEY:-$HOME/.ssh/id_ed25519}"
-SSH_OPTS=(-i "$SSH_KEY_FILE" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=10)
+SSH_OPTS=(-i "$SSH_KEY_FILE" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
 
 key_id=$(doctl compute ssh-key list --format ID,FingerPrint --no-header |
   awk -v fp="$(ssh-keygen -lf "$SSH_KEY_FILE.pub" -E md5 | awk '{print $2}' | sed 's/^MD5://')" '$2 == fp {print $1}')
@@ -31,11 +32,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> Creating $NAME ($SIZE in $REGION)"
-doctl compute droplet create "$NAME" --region "$REGION" --size "$SIZE" --image ubuntu-24-04-x64 \
-  --ssh-keys "$key_id" --tag-name murasil-builder --wait >/dev/null
+created=""
+for region in $REGIONS; do
+  echo "==> Creating $NAME ($SIZE in $region)"
+  if doctl compute droplet create "$NAME" --region "$region" --size "$SIZE" --image ubuntu-24-04-x64 \
+       --ssh-keys "$key_id" --tag-name murasil-builder --wait >/dev/null 2>/tmp/murasil-builder-create.err; then
+    created=$region
+    break
+  fi
+  echo "    not in $region: $(tail -1 /tmp/murasil-builder-create.err)"
+done
+[[ -n "$created" ]] || { echo "no region took a $SIZE droplet" >&2; exit 1; }
 ip=$(doctl compute droplet get "$NAME" --format PublicIPv4 --no-header)
-echo "    $ip"
+echo "    $ip ($created)"
 
 for _ in $(seq 1 30); do
   ssh "${SSH_OPTS[@]}" "root@$ip" true 2>/dev/null && break
@@ -48,10 +57,12 @@ set -euo pipefail
 repo=$1 ref=$2 thinlto=$3
 export DEBIAN_FRONTEND=noninteractive
 apt-get -qq update && apt-get -qq install -y docker.io git >/dev/null
-git clone -q --filter=blob:none "$repo" /src
+# One tree is enough for a build; the history is not (a partial clone of this
+# repository from GitHub stalled at 8 GB). $ref is a branch or tag.
+git clone -q --depth 1 --branch "$ref" "$repo" /src
 cd /src
-git checkout -q "$ref"
 git submodule update --init --depth 1 --jobs 16
+git log -1 --oneline
 
 # Upstream's own toolchain image for this exact source (clang, cmake, ninja, rust):
 # ci/docker/fasttest/Dockerfile is what their build jobs start from.
@@ -71,6 +82,7 @@ docker run --rm -v /src:/src -w /src murasil/ch-toolchain bash -euxc "
   ninja -C /src/build clickhouse-bundle
   /src/build/programs/clickhouse --version
 "
+ls -la /src/build/programs/ | head -20
 mkdir -p /out && cp /src/build/programs/clickhouse /out/clickhouse
 ls -la /out
 REMOTE
