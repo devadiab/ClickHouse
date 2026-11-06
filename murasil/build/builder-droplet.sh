@@ -43,13 +43,23 @@ for region in $REGIONS; do
   echo "    not in $region: $(tail -1 /tmp/murasil-builder-create.err)"
 done
 [[ -n "$created" ]] || { echo "no region took a $SIZE droplet" >&2; exit 1; }
-ip=$(doctl compute droplet get "$NAME" --format PublicIPv4 --no-header)
+# --wait returns before the public address is always listed.
+ip=""
+for _ in $(seq 1 30); do
+  ip=$(doctl compute droplet get "$NAME" --format PublicIPv4 --no-header 2>/dev/null | head -1)
+  [[ -n "$ip" && "$ip" != "<nil>" ]] && break
+  ip=""
+  sleep 5
+done
+[[ -n "$ip" ]] || { echo "the droplet never showed a public address" >&2; exit 1; }
 echo "    $ip ($created)"
 
-for _ in $(seq 1 30); do
-  ssh "${SSH_OPTS[@]}" "root@$ip" true 2>/dev/null && break
+up=""
+for _ in $(seq 1 36); do
+  if ssh "${SSH_OPTS[@]}" "root@$ip" true 2>/dev/null; then up=1; break; fi
   sleep 10
 done
+[[ -n "$up" ]] || { echo "ssh to $ip never came up" >&2; exit 1; }
 
 echo "==> Building $REF from $REPO_URL (this is the long part)"
 ssh "${SSH_OPTS[@]}" "root@$ip" bash -s -- "$REPO_URL" "$REF" "${MURASIL_THINLTO:-0}" <<'REMOTE'
