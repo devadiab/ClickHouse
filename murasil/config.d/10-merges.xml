@@ -1,0 +1,22 @@
+<!-- Merge selection for the platform's write pattern: every table takes a small insert
+     every few seconds, so a default server keeps rewriting the same data. Measured with
+     the same insert stream into tables that differ only in these settings, on 26.10:
+
+       20 rows every 5 s, 45 min, into a 100 MiB table:
+         default         152 merges, 114.6 MB read by merges, 4 parts, probe 4.7 ms
+         these settings   19 merges,   7.7 MB read by merges, 16 parts, probe 7.2 ms
+       3000 rows every 1 s, 30 min:
+         default         361 merges, 3134 MB read by merges,  8 parts, probe 9.6 ms
+         these settings   63 merges, 2196 MB read by merges, 18 parts, probe 12 ms
+
+     Keep merge_selector_small_parts_min_count under 50. merge_selector_base falls towards
+     1 as a partition nears 50 parts (min/max_parts_to_lower_base), so a gate that holds
+     small parts back past that makes every range eligible, and the biggest part gets
+     rewritten with each few small ones: min_count 60 with a 30 minute age read 172 GB
+     where the default read 115 MB. -->
+<clickhouse>
+    <merge_tree>
+        <merge_selector_small_parts_min_count>30</merge_selector_small_parts_min_count>
+        <merge_selector_base>10</merge_selector_base>
+    </merge_tree>
+</clickhouse>

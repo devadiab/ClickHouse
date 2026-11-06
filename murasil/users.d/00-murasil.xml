@@ -9,8 +9,8 @@
                  inserts of many tenants into one block, which then spanned more
                  partitions than allowed and failed them all. -->
             <async_insert>0</async_insert>
-            <!-- Tables are partitioned per tenant and month, so one batch legitimately
-                 holds one partition per active tenant. -->
+            <!-- One batch can hold rows for many months, as a replay does, and until the
+                 platform's schema 027 its tables were partitioned per tenant too. -->
             <max_partitions_per_insert_block>10000</max_partitions_per_insert_block>
         </default>
     </profiles>

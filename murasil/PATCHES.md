@@ -11,14 +11,18 @@ Base: `v26.10.2.103-stable`.
 
 ## Candidates
 
-What the live site's workload suggests, to be taken up only with numbers from
-`system.query_log` showing the gain:
+Measured against the platform's own workload (the platform's
+`docs/performance/clickhouse.md`). So far every gain came from moving to 26.10, from settings
+in `config.d/`, from the platform's own schema and from its insert format, and none needed
+a change to the engine:
 
-- **Insert batching for many small tables.** The platform writes ~15 tables (and
-  their materialized views) every few seconds; each flush is one part per table.
-  Upstream's `async_insert` covers this per table; measure whether a profile default
-  is enough before touching the merge selector.
+- **A build for this workload.** `cmake/profile_optimization.cmake` supports PGO and BOLT
+  against a chosen workload. Profiling on the platform's inserts, merges and page queries
+  is the next engine-level step, measured before and after with a replay of production's
+  query log.
+- **Merge selection.** `merge_selector_small_parts_min_count` makes the selector hand a round
+  to a range holding the biggest part once a partition nears `max_parts_to_lower_base`: the
+  setting at 60 read 172 GB where the default read 115 MB. A guard in `SimpleMergeSelector`
+  would make the setting safe at any value; worth offering upstream.
 - **Query guard.** A per-profile `max_rows_to_read` catches a page query that forgot
-  its date bound (the class of bug behind the November incident). Settings first;
-  a patch only if the error message needs to name the missing prune for the
-  platform's developers.
+  its date bound. Settings first.
