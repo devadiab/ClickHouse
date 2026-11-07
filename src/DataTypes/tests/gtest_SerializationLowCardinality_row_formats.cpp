@@ -51,7 +51,7 @@ TEST(SerializationLowCardinality, RowFormatValuesSurviveTypeChangesAndFailures)
     readWholeText(numbers_type, *numbers, "10");
 
     readWholeText(nullable_type, *nullables, "gamma");
-    readWholeText(nullable_type, *nullables, "\\N");
+    readWholeText(nullable_type, *nullables, "NULL");
     readWholeText(strings_type, *strings, "gamma");
 
     ASSERT_EQ(strings->size(), 4u);
