@@ -12,6 +12,11 @@
             <!-- One batch can hold rows for many months, as a replay does, and until the
                  platform's schema 027 its tables were partitioned per tenant too. -->
             <max_partitions_per_insert_block>10000</max_partitions_per_insert_block>
+            <!-- No profiler timers on query threads unless a profile is being taken
+                 (config.d/99-profile.xml.example): the samples went to trace_log, which
+                 this configuration leaves out. -->
+            <query_profiler_real_time_period_ns>0</query_profiler_real_time_period_ns>
+            <query_profiler_cpu_time_period_ns>0</query_profiler_cpu_time_period_ns>
         </default>
     </profiles>
 </clickhouse>

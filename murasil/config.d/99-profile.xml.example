@@ -1,0 +1,14 @@
+<!-- A profile of the whole server, background merges included, as the one the Murasil
+     tooling reads (murasil/bench/engine_profile.sql). Copy to 99-profile.xml, or mount it
+     into a container at /etc/clickhouse-server/config.d/99-profile.xml, for the length of a
+     measurement; not for a server in service. 10 ms of CPU per sample. -->
+<clickhouse>
+    <global_profiler_cpu_time_period_ns>10000000</global_profiler_cpu_time_period_ns>
+    <global_profiler_real_time_period_ns>0</global_profiler_real_time_period_ns>
+    <trace_log>
+        <database>system</database>
+        <table>trace_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+    </trace_log>
+</clickhouse>

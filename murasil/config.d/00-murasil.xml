@@ -7,11 +7,26 @@
     <text_log remove="remove"/>
     <processors_profile_log remove="remove"/>
 
-    <!-- System log tables grow without limit by default. -->
+    <!-- Measured on an 8 vCPU server under the platform's load (26.10, 14 hours): merging
+         the system logs cost 25,000 CPU seconds against 3,600 for merging the platform's
+         own tables. query_metric_log (a row per second per running query) was 13,100 of
+         it, nobody reads it. The metric logs sample every second by default; a sample
+         every 15 s says the same about a server, and the bench reads them over windows of
+         a minute or more. trace_log holds the profiler's samples: off unless a profile is
+         being taken (99-profile.xml.example turns it on). -->
+    <query_metric_log remove="remove"/>
+    <trace_log remove="remove"/>
+    <metric_log>
+        <collect_interval_milliseconds>15000</collect_interval_milliseconds>
+        <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+    </metric_log>
+    <asynchronous_metric_log>
+        <collect_interval_milliseconds>60000</collect_interval_milliseconds>
+        <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+    </asynchronous_metric_log>
+    <!-- System log tables grow without limit by default. query_log and part_log stay as
+         they are: the bench and every measurement in this fork read them. -->
     <query_log><ttl>event_date + INTERVAL 14 DAY DELETE</ttl></query_log>
     <part_log><ttl>event_date + INTERVAL 14 DAY DELETE</ttl></part_log>
-    <trace_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></trace_log>
-    <metric_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></metric_log>
-    <asynchronous_metric_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></asynchronous_metric_log>
     <query_views_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></query_views_log>
 </clickhouse>
