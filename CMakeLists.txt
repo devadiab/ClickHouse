@@ -192,7 +192,9 @@ if (OS_LINUX)
         set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--fatal-warnings")
     endif ()
 
-    if (LINKER_NAME MATCHES "lld" AND NOT SANITIZE AND NOT SANITIZE_COVERAGE AND NOT WITH_COVERAGE)
+    # Not for a build instrumented for PGO: the profile runtime's objects have address tables
+    # lld warns about under --icf=safe, and warnings are fatal above.
+    if (LINKER_NAME MATCHES "lld" AND NOT SANITIZE AND NOT SANITIZE_COVERAGE AND NOT WITH_COVERAGE AND NOT ENABLE_CLICKHOUSE_PGO_GENERATE)
         # Fold identical code and data sections to reduce binary size.
         # `safe` keeps address-taken functions distinct, as C and C++ require.
         set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--icf=safe")
