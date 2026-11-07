@@ -930,17 +930,29 @@ namespace
 /// each nested type it has seen instead (emptied before each use, and replaced when the type
 /// differs), which is one allocation and one free fewer per value of every LowCardinality
 /// column a server reads in a row format.
+thread_local MutableColumnPtr scratch_column;
+
 IColumn & scratchColumnFor(const IColumn & nested)
 {
-    static thread_local MutableColumnPtr scratch;
+    if (!scratch_column || !scratch_column->structureEquals(nested))
+        scratch_column = nested.cloneEmpty();
+    else if (size_t rows = scratch_column->size())
+        scratch_column->popBack(rows);
 
-    if (!scratch || !scratch->structureEquals(nested))
-        scratch = nested.cloneEmpty();
-    else if (size_t rows = scratch->size())
-        scratch->popBack(rows);
-
-    return *scratch;
+    return *scratch_column;
 }
+
+/// A value that could not be read may have left the scratch column half-written; the next
+/// value then starts from a new one.
+struct ScratchColumnGuard
+{
+    bool read = false;
+    ~ScratchColumnGuard()
+    {
+        if (!read)
+            scratch_column.reset();
+    }
+};
 
 }
 
@@ -950,8 +962,10 @@ void SerializationLowCardinality::deserializeImpl(
 {
     auto & low_cardinality_column = getColumnLowCardinality(column);
     IColumn & temp_column = scratchColumnFor(*low_cardinality_column.getDictionary().getNestedColumn());
+    ScratchColumnGuard guard;
 
     (nested_serialization.get()->*func)(temp_column, std::forward<Args>(args)...);
+    guard.read = true;
     low_cardinality_column.insertFromFullColumn(temp_column, 0);
 }
 
@@ -961,10 +975,12 @@ bool SerializationLowCardinality::tryDeserializeImpl(
 {
     auto & low_cardinality_column = getColumnLowCardinality(column);
     IColumn & temp_column = scratchColumnFor(*low_cardinality_column.getDictionary().getNestedColumn());
+    ScratchColumnGuard guard;
 
     if (!(nested_serialization.get()->*func)(temp_column, std::forward<Args>(args)...))
         return false;
 
+    guard.read = true;
     low_cardinality_column.insertFromFullColumn(temp_column, 0);
     return true;
 }
