@@ -4,6 +4,7 @@
 #include <Columns/ColumnNullable.h>
 #include <Columns/IColumn.h>
 #include <Columns/IColumnUnique.h>
+#include <limits>
 #include <Columns/ColumnIndex.h>
 #include <Common/assert_cast.h>
 #include <Common/typeid_cast.h>
@@ -28,7 +29,8 @@ class ColumnLowCardinality final : public COWHelper<IColumnHelper<ColumnLowCardi
     friend class COWHelper<IColumnHelper<ColumnLowCardinality>, ColumnLowCardinality>;
 
     ColumnLowCardinality(MutableColumnPtr && column_unique, MutableColumnPtr && indexes, bool is_shared);
-    ColumnLowCardinality(const ColumnLowCardinality & other) = default;
+    /// The translation cache is the copy's to build for itself: it names this column's dictionary.
+    ColumnLowCardinality(const ColumnLowCardinality & other) : Base(other), dictionary(other.dictionary), idx(other.idx) {}
 
 public:
     /** Create immutable column using immutable arguments. This arguments may be shared with other columns.
@@ -397,6 +399,32 @@ private:
 
     Dictionary dictionary;
     ColumnIndex idx;
+
+    /** Where a key of one source dictionary went in this column's dictionary, remembered from
+      * the first row that brought it: a merge inserts the rows of a few source columns one by
+      * one, and each row hashed its key into the dictionary again, although the few keys of a
+      * LowCardinality column are the same from one row to the next (6.5% of a merge's CPU in
+      * ReverseIndex::insert alone, on tables whose columns are mostly LowCardinality).
+      *
+      * The cache names its source dictionary and this column's by identity. A dictionary only
+      * ever grows in place, so an entry stays right while both objects are the same ones; this
+      * column's dictionary is replaced when it is compacted or shared, and the source is held
+      * by a pointer so its address is not reused under the cache. Only the keys a row has asked
+      * for are translated. Dictionaries past `max_translation_cache_keys` are not cached.
+      */
+    struct TranslationCache
+    {
+        ColumnPtr source;
+        const IColumn * destination = nullptr;
+        PaddedPODArray<UInt64> positions;
+    };
+    static constexpr size_t max_translation_cache_keys = 1 << 16;
+    static constexpr UInt64 untranslated = std::numeric_limits<UInt64>::max();
+    mutable TranslationCache translation;
+
+    /// The position of `src`'s key `position` in this column's dictionary, inserting the key
+    /// when it is new. `compactIfSharedDictionary()` has been called.
+    UInt64 translateKey(const ColumnLowCardinality & src, UInt64 position);
 
     void compactInplace();
     void compactInplaceToNullable();

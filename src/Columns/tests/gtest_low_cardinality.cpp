@@ -307,3 +307,66 @@ TEST(ColumnLowCardinality, ShortRangeFromDifferentDictionaryMatchesRangePath)
         EXPECT_EQ(assert_cast<const ColumnLowCardinality &>(*destination).getDictionary().size(), dictionary_size_before);
     }
 }
+
+/// Rows inserted one by one from columns with dictionaries of their own, as a merge inserts
+/// them: the key translation is remembered per source dictionary, and must give the same rows
+/// as inserting without it, through compactions, a source that grows, and sources that come
+/// and go at the same address.
+TEST(ColumnLowCardinality, InsertFromRemembersKeyTranslations)
+{
+    auto type = std::make_shared<DataTypeLowCardinality>(std::make_shared<DataTypeString>());
+    pcg64 rng(7);
+
+    auto make_source = [&](size_t keys, size_t rows, const std::string & prefix)
+    {
+        auto column = type->createColumn();
+        for (size_t i = 0; i < rows; ++i)
+            column->insert(prefix + std::to_string(rng() % keys));
+        return column;
+    };
+
+    for (size_t round = 0; round < 20; ++round)
+    {
+        std::vector<MutableColumnPtr> sources;
+        for (size_t s = 0; s < 4; ++s)
+            sources.push_back(make_source(1 + rng() % 40, 50 + rng() % 400, "k" + std::to_string(rng() % 3) + "_"));
+
+        auto merged = type->createColumn();
+        auto expected = std::make_shared<DataTypeString>()->createColumn();
+
+        /// Interleaved, with runs, as the sorted merge produces them.
+        for (size_t step = 0; step < 2000; ++step)
+        {
+            size_t s = rng() % sources.size();
+            size_t n = rng() % sources[s]->size();
+            if (rng() % 7 == 0)
+            {
+                size_t length = 1 + rng() % 5;
+                merged->insertManyFrom(*sources[s], n, length);
+                for (size_t i = 0; i < length; ++i)
+                    expected->insertFrom(*assert_cast<const ColumnLowCardinality &>(*sources[s]).convertToFullColumn(), n);
+            }
+            else
+            {
+                merged->insertFrom(*sources[s], n);
+                expected->insertFrom(*assert_cast<const ColumnLowCardinality &>(*sources[s]).convertToFullColumn(), n);
+            }
+
+            /// A source that grows keeps its old keys where they were.
+            if (rng() % 97 == 0)
+                sources[s]->insert(std::string("late_") + std::to_string(rng() % 1000));
+
+            /// A source replaced by another one, which may land at the same address.
+            if (rng() % 131 == 0)
+                sources[s] = make_source(1 + rng() % 40, 50 + rng() % 100, "r" + std::to_string(rng() % 5) + "_");
+
+            /// The destination compacted, so its dictionary is a new object.
+            if (rng() % 211 == 0)
+                assert_cast<ColumnLowCardinality &>(*merged).compactDictionaryInplace();
+        }
+
+        ASSERT_EQ(merged->size(), expected->size());
+        for (size_t i = 0; i < merged->size(); ++i)
+            ASSERT_EQ(merged->getDataAt(i), expected->getDataAt(i)) << "round " << round << " row " << i;
+    }
+}

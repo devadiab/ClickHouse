@@ -187,9 +187,32 @@ void ColumnLowCardinality::doInsertFrom(const IColumn & src, size_t n)
     else
     {
         compactIfSharedDictionary();
-        const auto & nested = *low_cardinality_src->getDictionary().getNestedColumn();
-        idx.insertIndex(getDictionary().uniqueInsertFrom(nested, position));
+        idx.insertIndex(translateKey(*low_cardinality_src, position));
     }
+}
+
+UInt64 ColumnLowCardinality::translateKey(const ColumnLowCardinality & src, UInt64 position)
+{
+    const auto & src_dictionary_ptr = src.getDictionaryPtr();
+    const IColumn & destination = getDictionary();
+    const size_t src_keys = src_dictionary_ptr->size();
+
+    if (src_keys > max_translation_cache_keys || position >= src_keys)
+        return getDictionary().uniqueInsertFrom(*src.getDictionary().getNestedColumn(), position);
+
+    if (translation.source.get() != src_dictionary_ptr.get() || translation.destination != &destination
+        || translation.positions.size() != src_keys)
+    {
+        translation.source = src_dictionary_ptr;
+        translation.destination = &destination;
+        translation.positions.assign(src_keys, untranslated);
+    }
+
+    UInt64 & translated = translation.positions[position];
+    if (translated == untranslated)
+        translated = getDictionary().uniqueInsertFrom(*src.getDictionary().getNestedColumn(), position);
+
+    return translated;
 }
 
 #if !defined(DEBUG_OR_SANITIZER_BUILD)
@@ -216,9 +239,7 @@ void ColumnLowCardinality::doInsertManyFrom(const IColumn & src, size_t position
     else
     {
         compactIfSharedDictionary();
-        const auto & nested = *low_cardinality_src->getDictionary().getNestedColumn();
-        const size_t destination_index = getDictionary().uniqueInsertFrom(nested, source_index);
-        idx.insertManyIndexes(destination_index, length);
+        idx.insertManyIndexes(translateKey(*low_cardinality_src, source_index), length);
     }
 }
 
