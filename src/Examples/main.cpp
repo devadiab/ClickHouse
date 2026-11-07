@@ -125,6 +125,7 @@ std::pair<std::string_view, MainFunc> examples[] =
     {"storage_memory_profiler", mainEntryExampleStorageMemoryProfiler},
     {"merge_selector", mainEntryExampleMergeSelector},
     {"merge_selector2", mainEntryExampleMergeSelector2},
+    {"merge_selector_murasil", mainEntryExampleMergeSelectorMurasil},
     {"get_current_inserts_in_replicated", mainEntryExampleGetCurrentInsertsInReplicated},
 };
 

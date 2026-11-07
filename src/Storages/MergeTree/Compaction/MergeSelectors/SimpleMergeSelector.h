@@ -218,6 +218,11 @@ public:
           * From right side of range, remove all parts, that size is less than specified ratio of sum_size.
           */
         bool enable_heuristic_to_remove_small_parts_at_right = true;
+        /// After the heuristic has trimmed a range, the range left has to reach the base on its
+        /// own, as `allow` demanded of the whole one. Without this, one large part and the
+        /// first small part after it are a candidate whenever the small parts behind them
+        /// cannot merge yet, and the large part is rewritten once per small insert.
+        bool recheck_base_after_right_tail_trim = true;
         double heuristic_to_remove_small_parts_at_right_max_ratio = 0.01;
         /// Zero means disabled.
         size_t merge_selector_min_age_to_disable_right_tail_heuristic = 0;

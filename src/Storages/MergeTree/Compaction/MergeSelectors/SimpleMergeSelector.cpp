@@ -18,6 +18,16 @@ namespace
 
 /** Estimates best set of parts to merge within passed alternatives.
   */
+double loweredBase(
+    double sum_size,
+    double min_age,
+    double partition_size,
+    double min_size_to_lower_base_log,
+    double max_size_to_lower_base_log,
+    const SimpleMergeSelector::Settings & settings);
+
+double amplification(double sum_size, double max_size, double size, const SimpleMergeSelector::Settings & settings);
+
 class Estimator
 {
 public:
@@ -35,8 +45,12 @@ public:
         size_t min_age,
         size_t size_prev_at_left,
         double min_partition_age,
+        double partition_size,
+        double min_size_to_lower_base_log,
+        double max_size_to_lower_base_log,
         const SimpleMergeSelector::Settings & settings)
     {
+        const PartsIterator untrimmed_end = end;
         /// Mirror the precedence from `allow`: a range that qualifies for force merge, by the age
         /// of its own parts or by the age of the whole partition, is exempt from both minimums below.
         const auto qualifies_for_force_merge = [&](time_t trimmed_min_age)
@@ -103,6 +117,38 @@ public:
                 && trimmed_max_size < settings.small_parts_threshold
                 && static_cast<size_t>(trimmed_max_age) < settings.small_parts_max_age)
                 return;
+        }
+
+        /// Re-check the base after trimming. `allow` accepted the whole range for the small
+        /// parts the tail held: with them gone, what is left can be one large part and the
+        /// first small one, a merge that rewrites the large part for almost nothing. Under a
+        /// steady stream of small inserts that is the same part rewritten once per insert,
+        /// hundreds of times (measured: a 116 MiB part at level 80, merged with one 400 KiB
+        /// part at a time, was three quarters of a table's merge CPU). Such a candidate is
+        /// not offered; the small parts merge among themselves when they are allowed to.
+        if (settings.recheck_base_after_right_tail_trim && end != untrimmed_end)
+        {
+            size_t trimmed_max_size = 0;
+            time_t trimmed_min_age = begin->age;
+            for (auto it = begin; it != end; ++it)
+            {
+                trimmed_max_size = std::max(trimmed_max_size, it->size);
+                trimmed_min_age = std::min(trimmed_min_age, it->age);
+            }
+
+            if (!qualifies_for_force_merge(trimmed_min_age))
+            {
+                const double lowered_base = loweredBase(
+                    static_cast<double>(sum_size),
+                    static_cast<double>(trimmed_min_age),
+                    partition_size,
+                    min_size_to_lower_base_log,
+                    max_size_to_lower_base_log,
+                    settings);
+
+                if (amplification(static_cast<double>(sum_size), static_cast<double>(trimmed_max_size), static_cast<double>(range_size), settings) < lowered_base)
+                    return;
+            }
         }
 
         double current_score = score(static_cast<double>(end - begin), static_cast<double>(sum_size), static_cast<double>(settings.size_fixed_cost_to_add));
@@ -199,6 +245,43 @@ double mapPiecewiseLinearToUnit(double value, double min, double max)
 }
 
 
+/** The base a range of parts has to reach, lowered from `settings.base` towards 2 as the
+  * partition fills and the parts age (see the comment on `base` in SimpleMergeSelector.h).
+  * The blurry mode's random component is not applied here.
+  */
+double loweredBase(
+    double sum_size,
+    double min_age,
+    double partition_size,
+    double min_size_to_lower_base_log,
+    double max_size_to_lower_base_log,
+    const SimpleMergeSelector::Settings & settings)
+{
+    /// Map size to 0..1 using logarithmic scale
+    /// Use log(1 + x) instead of log1p(x) because our sum_size is always integer.
+    /// Also log1p seems to be slow and significantly affect performance of merges assignment.
+    double size_normalized = mapPiecewiseLinearToUnit(log(1 + sum_size), min_size_to_lower_base_log, max_size_to_lower_base_log);
+    /// Calculate boundaries for age
+    double min_age_to_lower_base = interpolateLinear(static_cast<double>(settings.min_age_to_lower_base_at_min_size), static_cast<double>(settings.min_age_to_lower_base_at_max_size), size_normalized);
+    double max_age_to_lower_base = interpolateLinear(static_cast<double>(settings.max_age_to_lower_base_at_min_size), static_cast<double>(settings.max_age_to_lower_base_at_max_size), size_normalized);
+    /// Map age to 0..1
+    double age_normalized = mapPiecewiseLinearToUnit(min_age, min_age_to_lower_base, max_age_to_lower_base);
+    /// Map partition_size to 0..1
+    double num_parts_normalized = mapPiecewiseLinearToUnit(partition_size, static_cast<double>(settings.min_parts_to_lower_base), static_cast<double>(settings.max_parts_to_lower_base));
+    /// The ratio should be within [0, 1]
+    double combined_ratio = std::min(1.0, age_normalized + num_parts_normalized);
+
+    return interpolateLinear(settings.base, 2.0, combined_ratio);
+}
+
+/// The write amplification a merge of `size` parts stands for: what is read against the
+/// biggest part it is read into. A merge is worth doing when this reaches the base.
+double amplification(double sum_size, double max_size, double size, const SimpleMergeSelector::Settings & settings)
+{
+    return (sum_size + size * static_cast<double>(settings.size_fixed_cost_to_add))
+        / (max_size + static_cast<double>(settings.size_fixed_cost_to_add));
+}
+
 /** Is allowed to merge parts in range with specific properties.
   */
 bool allow(
@@ -238,21 +321,7 @@ bool allow(
         && size < settings.small_parts_min_count)
         return false;
 
-    /// Map size to 0..1 using logarithmic scale
-    /// Use log(1 + x) instead of log1p(x) because our sum_size is always integer.
-    /// Also log1p seems to be slow and significantly affect performance of merges assignment.
-    double size_normalized = mapPiecewiseLinearToUnit(log(1 + sum_size), min_size_to_lower_base_log, max_size_to_lower_base_log);
-    /// Calculate boundaries for age
-    double min_age_to_lower_base = interpolateLinear(static_cast<double>(settings.min_age_to_lower_base_at_min_size), static_cast<double>(settings.min_age_to_lower_base_at_max_size), size_normalized);
-    double max_age_to_lower_base = interpolateLinear(static_cast<double>(settings.max_age_to_lower_base_at_min_size), static_cast<double>(settings.max_age_to_lower_base_at_max_size), size_normalized);
-    /// Map age to 0..1
-    double age_normalized = mapPiecewiseLinearToUnit(min_age, min_age_to_lower_base, max_age_to_lower_base);
-    /// Map partition_size to 0..1
-    double num_parts_normalized = mapPiecewiseLinearToUnit(partition_size, static_cast<double>(settings.min_parts_to_lower_base), static_cast<double>(settings.max_parts_to_lower_base));
-    /// The ratio should be within [0, 1]
-    double combined_ratio = std::min(1.0, age_normalized + num_parts_normalized);
-
-    double lowered_base = interpolateLinear(settings.base, 2.0, combined_ratio);
+    double lowered_base = loweredBase(sum_size, min_age, partition_size, min_size_to_lower_base_log, max_size_to_lower_base_log, settings);
     if (settings.use_blurry_base)
     {
         double partition_fill_factor = std::max(0., 1 - partition_size / static_cast<double>(settings.parts_to_throw_insert));
@@ -268,7 +337,7 @@ bool allow(
         lowered_base = std::min(distribution(thread_local_rng), std::max(1.01, lowered_base));
     }
 
-    return (sum_size + static_cast<double>(size) * static_cast<double>(settings.size_fixed_cost_to_add)) / (max_size + static_cast<double>(settings.size_fixed_cost_to_add)) >= lowered_base;
+    return amplification(sum_size, max_size, static_cast<double>(size), settings) >= lowered_base;
 }
 
 
@@ -451,6 +520,9 @@ void selectWithinPartsRange(
                     min_age,
                     begin == 0 ? 0 : parts[begin - 1].size,
                     min_partition_age,
+                    static_cast<double>(parts_count),
+                    min_size_to_lower_base_log,
+                    max_size_to_lower_base_log,
                     settings);
         }
     }

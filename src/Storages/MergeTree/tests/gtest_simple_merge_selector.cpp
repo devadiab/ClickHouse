@@ -430,6 +430,56 @@ TEST(SimpleMergeSelector, SmallPartsMinCountSurvivesRightTailTrim)
 }
 
 
+/// One large part followed by small fresh parts, fewer than `small_parts_min_count`. The gate
+/// holds the small parts back, so the only range `allow` accepts holds the large part too,
+/// passing on the small parts' count. The right-tail heuristic then trims the small parts
+/// away, down to the large part and the first small one: a merge that rewrites the large
+/// part for one small one, and again for the next insert (seen in production at level 80).
+/// The trimmed range has to reach the base on its own, as any other range has to.
+TEST(SimpleMergeSelector, RightTailTrimCannotLeaveALargePartWithOneSmallOne)
+{
+    SimpleMergeSelector::Settings settings;
+    settings.enable_heuristic_to_lower_max_parts_to_merge_at_once = false;
+    settings.enable_heuristic_to_align_parts = false;
+    settings.base = 10;
+    settings.small_parts_threshold = 10 * MiB;
+    settings.small_parts_min_count = 30;
+    settings.small_parts_max_age = 600;
+    settings.enable_heuristic_to_remove_small_parts_at_right = true;
+
+    /// 116 MiB, an hour old, then 12 fresh parts of 400 KiB: the stream of inserts since the
+    /// last merge. 13 parts in the partition keeps the base near 10 (no lowering for count).
+    std::vector<size_t> sizes{116 * MiB};
+    std::vector<time_t> ages{3600};
+    for (size_t i = 0; i < 12; ++i)
+    {
+        sizes.push_back(400 * KiB);
+        ages.push_back(5);
+    }
+
+    SimpleMergeSelector selector(settings);
+    auto parts_range = makePartsRange(sizes, ages);
+    std::vector<MergeConstraint> constraints{{100ULL * GiB, std::numeric_limits<size_t>::max()}};
+    PartsRanges selected = selector.select({parts_range}, constraints, nullptr);
+
+    /// Nothing is worth merging yet: the small parts wait for their thirtieth, and the large
+    /// part is not rewritten for one of them.
+    ASSERT_TRUE(selected.empty()) << "a trimmed range must still reach the base";
+
+    /// Thirty small parts, and the small parts merge among themselves: the large part stays.
+    for (size_t i = 12; i < 30; ++i)
+    {
+        sizes.push_back(400 * KiB);
+        ages.push_back(5);
+    }
+    parts_range = makePartsRange(sizes, ages);
+    selected = selector.select({parts_range}, constraints, nullptr);
+    ASSERT_EQ(selected.size(), 1);
+    ASSERT_EQ(selected[0].size(), 30);
+    ASSERT_EQ(selected[0].front().name, partName(1));
+}
+
+
 /// Regression test: `small_parts_min_count` must use the trimmed range's `max_age`, not
 /// the pre-trim `max_age`. If the right tail contains the only old part and trimming
 /// removes it, the surviving range is all-small-fresh and below `min_count` — exactly the

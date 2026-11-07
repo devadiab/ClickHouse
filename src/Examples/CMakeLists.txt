@@ -77,6 +77,7 @@ list(APPEND EXAMPLES_SOURCES ../Parsers/examples/parser_memory_profiler.cpp)
 list(APPEND EXAMPLES_SOURCES storage_memory_profiler.cpp)
 list(APPEND EXAMPLES_SOURCES ../Storages/examples/merge_selector.cpp)
 list(APPEND EXAMPLES_SOURCES ../Storages/examples/merge_selector2.cpp)
+list(APPEND EXAMPLES_SOURCES ../Storages/examples/merge_selector_murasil.cpp)
 list(APPEND EXAMPLES_SOURCES ../Storages/examples/get_current_inserts_in_replicated.cpp)
 
 if (TARGET ch_contrib::krb5)
