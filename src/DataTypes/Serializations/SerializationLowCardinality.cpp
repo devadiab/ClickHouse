@@ -921,7 +921,6 @@ void SerializationLowCardinality::serializeImpl(
     (nested_serialization.get()->*func)(*low_cardinality_column.getDictionary().getNestedColumn(), unique_row_number, std::forward<Args>(args)...);
 }
 
-template <typename... Params, typename... Args>
 namespace
 {
 

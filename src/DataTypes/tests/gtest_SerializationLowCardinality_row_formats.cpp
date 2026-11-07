@@ -1,5 +1,6 @@
 #include <Columns/ColumnLowCardinality.h>
 #include <DataTypes/DataTypeFactory.h>
+#include <DataTypes/IDataType.h>
 #include <Formats/FormatSettings.h>
 #include <IO/ReadBufferFromString.h>
 
