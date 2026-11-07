@@ -7,6 +7,11 @@
 #   murasil/build/pgo-droplet.sh final <dir>  merge the *.profraw in <dir>, start the final build
 #   murasil/build/pgo-droplet.sh fetch        fetch the final binary to murasil/out
 #   murasil/build/pgo-droplet.sh down         delete the droplet
+#   murasil/build/pgo-droplet.sh build <profdata.zst> [ref]
+#                                             a fresh droplet, the final build straight from a
+#                                             profile kept from an earlier run (the code since
+#                                             then is unprofiled where it changed), and the
+#                                             examples binary with the merge selector replay
 #
 # Between `instrumented` and `final`, run the instrumented binary under the platform's own
 # load with LLVM_PROFILE_FILE set, and stop it cleanly: it writes its profile on exit. The
@@ -121,6 +126,70 @@ cmd_fetch() {
   ls -la "$OUT/clickhouse-pgo" "$OUT/murasil.profdata"
 }
 
+cmd_build() {
+  local profdata=$1 ref="${2:-murasil}" key_id created="" ip=""
+  [[ -f "$profdata" ]] || { echo "no profile at $profdata" >&2; exit 1; }
+  key_id=$(doctl compute ssh-key list --format ID,FingerPrint --no-header |
+    awk -v fp="$(ssh-keygen -lf "$SSH_KEY_FILE.pub" -E md5 | awk '{print $2}' | sed 's/^MD5://')" '$2 == fp {print $1}')
+  [[ -n "$key_id" ]] || { echo "the SSH key is not registered in DigitalOcean" >&2; exit 1; }
+  for region in $REGIONS; do
+    if doctl compute droplet create "$NAME" --region "$region" --size "$SIZE" --image ubuntu-24-04-x64 \
+         --ssh-keys "$key_id" --tag-name murasil-builder --wait >/dev/null 2>/tmp/murasil-pgo-create.err; then
+      created=$region
+      break
+    fi
+    echo "    not in $region: $(tail -1 /tmp/murasil-pgo-create.err)"
+  done
+  [[ -n "$created" ]] || { echo "no region took a $SIZE droplet" >&2; exit 1; }
+  for _ in $(seq 1 30); do ip=$(ip_of); [[ -n "$ip" && "$ip" != "<nil>" ]] && break; sleep 5; done
+  echo "==> $NAME at $ip in $created"
+  for _ in $(seq 1 36); do ssh "${SSH_OPTS[@]}" "root@$ip" true 2>/dev/null && break; sleep 10; done
+  r 'mkdir -p /out /profiles'
+  scp -q "${SSH_OPTS[@]}" "$profdata" "root@$ip:/profiles/murasil.profdata.zst"
+  scp -q "${SSH_OPTS[@]}" "$(dirname "$0")/../bench/dlr_events_20261107T2020.tsv" "root@$ip:/root/parts.tsv"
+
+  r bash -s -- "$REPO_URL" "$ref" <<'REMOTE'
+set -euo pipefail
+repo=$1 ref=$2
+export DEBIAN_FRONTEND=noninteractive
+apt-get -qq update && apt-get -qq install -y docker.io git zstd >/dev/null
+apt-get -qq install -y docker-buildx >/dev/null 2>&1 || true
+zstd -d -q -f /profiles/murasil.profdata.zst -o /profiles/murasil.profdata
+cat > /root/configure.sh <<'SH'
+set -eu
+llvm=$(sed -n 's/.*LLVM_VERSION=\([0-9][0-9]*\).*/\1/p' /src/ci/docker/fasttest/Dockerfile | head -1)
+dir=$1; shift
+cmake -DCMAKE_BUILD_TYPE=None -DSANITIZE= \
+  -DBUILD_STRIPPED_BINARY=1 -DENABLE_CLICKHOUSE_SELF_EXTRACTING=0 \
+  -DCMAKE_C_COMPILER=clang-$llvm -DCMAKE_CXX_COMPILER=clang++-$llvm \
+  -DCMAKE_TOOLCHAIN_FILE=/src/cmake/linux/toolchain-x86_64.cmake \
+  -DENABLE_TESTS=0 -DENABLE_UTILS=0 -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON \
+  "$@" -S /src -B "$dir"
+SH
+cat > /root/build.sh <<SH
+set -eux
+git clone -q --depth 1 --branch "$ref" "$repo" /src
+cd /src
+git submodule update --init --depth 1 --jobs 16
+git log -1 --oneline
+export DOCKER_BUILDKIT=1
+docker build -q -t murasil/ch-toolchain --build-arg TARGETARCH=amd64 -f ci/docker/fasttest/Dockerfile ci/docker/fasttest
+docker run --rm -v /src:/src -v /root:/root -v /profiles:/profiles -w /src murasil/ch-toolchain bash /root/configure.sh /src/build-final -DENABLE_THINLTO=1 -DENABLE_EXAMPLES=1 -DCLICKHOUSE_PGO_PROFILE_PATH=/profiles/murasil.profdata
+docker run --rm -v /src:/src -v /root:/root -w /src murasil/ch-toolchain ninja -C /src/build-final clickhouse-examples
+ex=/src/build-final/src/Examples/clickhouse-examples
+for recheck in 0 1; do for tail in 1 0; do echo "RECHECK=\$recheck RIGHT_TAIL=\$tail: \$(BASE=10 SMALL_MIN_COUNT=30 RIGHT_TAIL=\$tail RECHECK=\$recheck \$ex merge_selector_murasil < /root/parts.tsv)"; done; done | tee /out/selector_replay.txt
+echo SELECTOR_DONE
+docker run --rm -v /src:/src -v /root:/root -w /src murasil/ch-toolchain ninja -C /src/build-final clickhouse clickhouse-stripped
+cp /src/build-final/programs/clickhouse-stripped /out/clickhouse
+/out/clickhouse --version
+sha256sum /out/clickhouse
+echo FINAL_DONE
+SH
+nohup bash /root/build.sh > /root/final.log 2>&1 &
+REMOTE
+  echo "==> build started: $0 status"
+}
+
 cmd_down() { doctl compute droplet delete "$NAME" --force; }
 
 case "${1:-}" in
@@ -130,5 +199,6 @@ case "${1:-}" in
   final) cmd_final "$2" ;;
   fetch) cmd_fetch ;;
   down) cmd_down ;;
+  build) cmd_build "$2" "${3:-}" ;;
   *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
