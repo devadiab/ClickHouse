@@ -20,8 +20,10 @@ set -euo pipefail
 
 REPO_URL="${MURASIL_CH_REPO:-$(git -C "$(dirname "$0")/../.." remote get-url origin)}"
 NAME="murasil-ch-pgo"
-REGIONS="${MURASIL_BUILDER_REGIONS:-fra1 ams3 lon1 nyc3}"
-SIZE="${MURASIL_BUILDER_SIZE:-c-32}"
+REGIONS="${MURASIL_BUILDER_REGIONS:-fra1 ams3 lon1 nyc3 nyc1 sfo3}"
+# The biggest dedicated-CPU machines DigitalOcean sells, tried in order per region: the build is
+# 17,500 parallel steps and a 60-core box does it in a little over half the time of a c-32.
+SIZES="${MURASIL_BUILDER_SIZE:-c5-60vcpu-120gb-intel c2-60vcpu-120gb-intel c-60-intel g5-64vcpu-256gb-80gb c-48 c-32}"
 OUT="$(cd "$(dirname "$0")/.." && pwd)/out"
 SSH_KEY_FILE="${MURASIL_SSH_KEY:-$HOME/.ssh/id_ed25519}"
 SSH_OPTS=(-i "$SSH_KEY_FILE" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o LogLevel=ERROR)
@@ -34,15 +36,17 @@ cmd_up() {
   key_id=$(doctl compute ssh-key list --format ID,FingerPrint --no-header |
     awk -v fp="$(ssh-keygen -lf "$SSH_KEY_FILE.pub" -E md5 | awk '{print $2}' | sed 's/^MD5://')" '$2 == fp {print $1}')
   [[ -n "$key_id" ]] || { echo "the SSH key is not registered in DigitalOcean" >&2; exit 1; }
-  for region in $REGIONS; do
-    if doctl compute droplet create "$NAME" --region "$region" --size "$SIZE" --image ubuntu-24-04-x64 \
-         --ssh-keys "$key_id" --tag-name murasil-builder --wait >/dev/null 2>/tmp/murasil-pgo-create.err; then
-      created=$region
-      break
-    fi
-    echo "    not in $region: $(tail -1 /tmp/murasil-pgo-create.err)"
+  for size in $SIZES; do
+    for region in $REGIONS; do
+      if doctl compute droplet create "$NAME" --region "$region" --size "$size" --image ubuntu-24-04-x64 \
+           --ssh-keys "$key_id" --tag-name murasil-builder --wait >/dev/null 2>/tmp/murasil-pgo-create.err; then
+        created="$region ($size)"
+        break 2
+      fi
+      echo "    no $size in $region: $(tail -1 /tmp/murasil-pgo-create.err | cut -c1-100)"
+    done
   done
-  [[ -n "$created" ]] || { echo "no region took a $SIZE droplet" >&2; exit 1; }
+  [[ -n "$created" ]] || { echo "no region took any of: $SIZES" >&2; exit 1; }
   for _ in $(seq 1 30); do ip=$(ip_of); [[ -n "$ip" && "$ip" != "<nil>" ]] && break; sleep 5; done
   echo "==> $NAME at $ip in $created"
   for _ in $(seq 1 36); do ssh "${SSH_OPTS[@]}" "root@$ip" true 2>/dev/null && break; sleep 10; done
@@ -134,15 +138,17 @@ cmd_build() {
   key_id=$(doctl compute ssh-key list --format ID,FingerPrint --no-header |
     awk -v fp="$(ssh-keygen -lf "$SSH_KEY_FILE.pub" -E md5 | awk '{print $2}' | sed 's/^MD5://')" '$2 == fp {print $1}')
   [[ -n "$key_id" ]] || { echo "the SSH key is not registered in DigitalOcean" >&2; exit 1; }
-  for region in $REGIONS; do
-    if doctl compute droplet create "$NAME" --region "$region" --size "$SIZE" --image ubuntu-24-04-x64 \
-         --ssh-keys "$key_id" --tag-name murasil-builder --wait >/dev/null 2>/tmp/murasil-pgo-create.err; then
-      created=$region
-      break
-    fi
-    echo "    not in $region: $(tail -1 /tmp/murasil-pgo-create.err)"
+  for size in $SIZES; do
+    for region in $REGIONS; do
+      if doctl compute droplet create "$NAME" --region "$region" --size "$size" --image ubuntu-24-04-x64 \
+           --ssh-keys "$key_id" --tag-name murasil-builder --wait >/dev/null 2>/tmp/murasil-pgo-create.err; then
+        created="$region ($size)"
+        break 2
+      fi
+      echo "    no $size in $region: $(tail -1 /tmp/murasil-pgo-create.err | cut -c1-100)"
+    done
   done
-  [[ -n "$created" ]] || { echo "no region took a $SIZE droplet" >&2; exit 1; }
+  [[ -n "$created" ]] || { echo "no region took any of: $SIZES" >&2; exit 1; }
   for _ in $(seq 1 30); do ip=$(ip_of); [[ -n "$ip" && "$ip" != "<nil>" ]] && break; sleep 5; done
   echo "==> $NAME at $ip in $created"
   for _ in $(seq 1 36); do ssh "${SSH_OPTS[@]}" "root@$ip" true 2>/dev/null && break; sleep 10; done
