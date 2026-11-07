@@ -188,7 +188,9 @@ if (OS_LINUX)
     #   and whatever is poisoning it by LD_PRELOAD should not link to our symbols.
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--no-export-dynamic -Wl,--gc-sections")
 
-    if (LINKER_NAME MATCHES "lld")
+    # Not with a profile: at the ThinLTO link the optimizer reports hinted loops it did not
+    # vectorize under the profile's weights, and those come through lld as warnings.
+    if (LINKER_NAME MATCHES "lld" AND NOT CLICKHOUSE_PGO_PROFILE_PATH)
         set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--fatal-warnings")
     endif ()
 
