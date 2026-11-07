@@ -179,11 +179,11 @@ git log -1 --oneline
 export DOCKER_BUILDKIT=1
 docker build -q -t murasil/ch-toolchain --build-arg TARGETARCH=amd64 -f ci/docker/fasttest/Dockerfile ci/docker/fasttest
 docker run --rm -v /src:/src -v /root:/root -v /profiles:/profiles -w /src murasil/ch-toolchain bash /root/configure.sh /src/build-final -DENABLE_THINLTO=1 -DENABLE_EXAMPLES=1 -DCLICKHOUSE_PGO_PROFILE_PATH=/profiles/murasil.profdata
-docker run --rm -v /src:/src -v /root:/root -w /src murasil/ch-toolchain ninja -C /src/build-final clickhouse-examples
+docker run --rm -v /src:/src -v /root:/root -v /profiles:/profiles -w /src murasil/ch-toolchain ninja -C /src/build-final clickhouse-examples
 ex=/src/build-final/src/Examples/clickhouse-examples
 for recheck in 0 1; do for tail in 1 0; do echo "RECHECK=\$recheck RIGHT_TAIL=\$tail: \$(BASE=10 SMALL_MIN_COUNT=30 RIGHT_TAIL=\$tail RECHECK=\$recheck \$ex merge_selector_murasil < /root/parts.tsv)"; done; done | tee /out/selector_replay.txt
 echo SELECTOR_DONE
-docker run --rm -v /src:/src -v /root:/root -w /src murasil/ch-toolchain ninja -C /src/build-final clickhouse clickhouse-stripped
+docker run --rm -v /src:/src -v /root:/root -v /profiles:/profiles -w /src murasil/ch-toolchain ninja -C /src/build-final clickhouse clickhouse-stripped
 cp /src/build-final/programs/clickhouse-stripped /out/clickhouse
 /out/clickhouse --version
 sha256sum /out/clickhouse
