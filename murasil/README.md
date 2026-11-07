@@ -37,6 +37,10 @@ is a one-line change of the base tag if a release misbehaves.
   configuration.
 - `PATCHES.md` every change to the engine itself, with why it exists and whether it
   was offered upstream.
+- `bench/` how the fork is measured: production's 160 costliest queries (`queries.jsonl`)
+  and their replay (`replay.py`), the engine profile (`engine_profile.sql`,
+  `profile_run.sh`, `perf_ch.sh`, `perf_fold.py`), the write-side A/B (`merge_ab.sh`) and
+  a partition read from `part_log` for the merge selector replay.
 
 ## Rules
 
