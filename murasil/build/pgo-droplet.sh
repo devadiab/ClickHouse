@@ -51,6 +51,8 @@ cmd_up() {
 set -euo pipefail
 repo=$1 ref=$2
 export DEBIAN_FRONTEND=noninteractive
+# cloud-init's own apt run holds the lock for a minute after boot.
+while fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 5; done
 apt-get -qq update && apt-get -qq install -y docker.io git zstd >/dev/null
 apt-get -qq install -y docker-buildx >/dev/null 2>&1 || true
 mkdir -p /out /profiles
@@ -152,6 +154,8 @@ cmd_build() {
 set -euo pipefail
 repo=$1 ref=$2
 export DEBIAN_FRONTEND=noninteractive
+# cloud-init's own apt run holds the lock for a minute after boot.
+while fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 5; done
 apt-get -qq update && apt-get -qq install -y docker.io git zstd >/dev/null
 apt-get -qq install -y docker-buildx >/dev/null 2>&1 || true
 zstd -d -q -f /profiles/murasil.profdata.zst -o /profiles/murasil.profdata
