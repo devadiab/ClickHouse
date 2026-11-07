@@ -6,17 +6,18 @@ set -euo pipefail
 REPO="/Users/adiab/SMS Platform/sms_platform"
 source "$REPO/deploy/digitalocean/lib.sh"
 host=$1
-remote "$host" 'docker exec -i murasil_clickhouse sh -c "clickhouse-client --password \"\$CLICKHOUSE_PASSWORD\" --multiquery"' <<'SQL' 2>&1 | grep -v "known hosts"
+remote "$host" 'docker exec -i murasil_clickhouse sh -c "clickhouse-client --password \"\$CLICKHOUSE_PASSWORD\" --multiquery"' <<'SQL' 2>&1 | { grep -v "known hosts" || true; }
 DROP TABLE IF EXISTS lc_check;
 DROP TABLE IF EXISTS lc_check_plain;
+SET allow_suspicious_low_cardinality_types = 1;
 CREATE TABLE lc_check (k UInt64, a LowCardinality(String), b LowCardinality(Nullable(String)), c LowCardinality(UInt16), d String) ENGINE = MergeTree ORDER BY k SETTINGS merge_selector_enable_heuristic_to_remove_small_parts_at_right = 0;
 CREATE TABLE lc_check_plain (k UInt64, a String, b Nullable(String), c UInt16, d String) ENGINE = MergeTree ORDER BY k;
 SET max_insert_block_size = 100000;
 -- 400 inserts, each a part with a few of 60 keys, keys and null share drawn from the batch, rows interleaved by k across parts
 INSERT INTO lc_check_plain SELECT number * 400 + batch AS k, concat('key_', toString((number * 7 + batch * 13) % (3 + batch % 57))) AS a, if((number + batch) % 11 = 0, NULL, concat('b', toString((number * 3 + batch) % 97))) AS b, toUInt16((number + batch * 5) % 500) AS c, concat('plain_', toString(number)) AS d FROM numbers(300) ARRAY JOIN range(400) AS batch;
 SQL
-for batch in $(seq 0 399); do echo "INSERT INTO lc_check SELECT k, a, b, c, d FROM lc_check_plain WHERE k % 400 = $batch;"; done | remote "$host" 'docker exec -i murasil_clickhouse sh -c "clickhouse-client --password \"\$CLICKHOUSE_PASSWORD\" --multiquery"' 2>&1 | grep -v "known hosts"
-remote "$host" 'docker exec -i murasil_clickhouse sh -c "clickhouse-client --password \"\$CLICKHOUSE_PASSWORD\" --multiquery"' <<'SQL' 2>&1 | grep -v "known hosts"
+for batch in $(seq 0 399); do echo "INSERT INTO lc_check SELECT k, a, b, c, d FROM lc_check_plain WHERE k % 400 = $batch;"; done | remote "$host" 'docker exec -i murasil_clickhouse sh -c "clickhouse-client --password \"\$CLICKHOUSE_PASSWORD\" --multiquery"' 2>&1 | { grep -v "known hosts" || true; }
+remote "$host" 'docker exec -i murasil_clickhouse sh -c "clickhouse-client --password \"\$CLICKHOUSE_PASSWORD\" --multiquery"' <<'SQL' 2>&1 | { grep -v "known hosts" || true; }
 SELECT count() AS parts_before FROM system.parts WHERE active AND table = 'lc_check';
 OPTIMIZE TABLE lc_check FINAL;
 SELECT count() AS parts_after FROM system.parts WHERE active AND table = 'lc_check';
