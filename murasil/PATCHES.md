@@ -16,7 +16,7 @@ Base: `v26.10.2.103-stable`.
 
 | Build | Contents | Measured |
 |---|---|---|
-| murasil3 (`4dbfb2e9…`, 2026-11-07) | 26.10.2.103 + selector patch + LowCardinality translation cache, ThinLTO, PGO on the platform's inserts, merges and page queries | Against murasil1 (selector patch, no PGO) on the bench pair, 7000 msg/s x 300 s, two cycles each: insert CPU 85/84 -> 61/63 s (-27%), merges of two or three parts 29/61 -> 0/0, merge CPU 125/119 -> 71/244 s (a 5-minute window catches merges unevenly; the repro above is the fair merge comparison). Page queries on the clone (`bench/replay.py`, 3 rounds, sum of medians): 6,897 -> 5,227 ms (-24%), CPU 13,946 -> 12,035 ms (-14%), first cycle. |
+| murasil3 (`4dbfb2e9…`, 2026-11-07) | 26.10.2.103 + selector patch + LowCardinality translation cache, ThinLTO, PGO on the platform's inserts, merges and page queries | Against murasil1 (selector patch, no PGO) on the bench pair, 7000 msg/s x 300 s, two cycles each: insert CPU 85/84 -> 61/63 s (-27%), merges of two or three parts 29/61 -> 0/0, merge CPU 125/119 -> 71/244 s (a 5-minute window catches merges unevenly; the repro above is the fair merge comparison). Page queries on the clone (`bench/replay.py`, 3 rounds, sum of medians): 6,897 -> 5,227 ms and 5,715 -> 4,788 ms (-24%, -16%), CPU 13,946 -> 12,035 and 12,792 -> 11,403 ms (-14%, -11%). Unit tests: 36 of the three touched suites pass on the dev build. |
 
 ## Candidates
 
