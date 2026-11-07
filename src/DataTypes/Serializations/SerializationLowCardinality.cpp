@@ -922,14 +922,37 @@ void SerializationLowCardinality::serializeImpl(
 }
 
 template <typename... Params, typename... Args>
+namespace
+{
+
+/// One value of a row-oriented format is read into a column of the nested type and then put
+/// into the dictionary. That column was made and freed for every value; a thread keeps one of
+/// each nested type it has seen instead (emptied before each use, and replaced when the type
+/// differs), which is one allocation and one free fewer per value of every LowCardinality
+/// column a server reads in a row format.
+IColumn & scratchColumnFor(const IColumn & nested)
+{
+    static thread_local MutableColumnPtr scratch;
+
+    if (!scratch || !scratch->structureEquals(nested))
+        scratch = nested.cloneEmpty();
+    else if (size_t rows = scratch->size())
+        scratch->popBack(rows);
+
+    return *scratch;
+}
+
+}
+
+template <typename... Params, typename... Args>
 void SerializationLowCardinality::deserializeImpl(
     IColumn & column, SerializationLowCardinality::DeserializeFunctionPtr<Params...> func, Args &&... args) const
 {
     auto & low_cardinality_column = getColumnLowCardinality(column);
-    auto temp_column = low_cardinality_column.getDictionary().getNestedColumn()->cloneEmpty();
+    IColumn & temp_column = scratchColumnFor(*low_cardinality_column.getDictionary().getNestedColumn());
 
-    (nested_serialization.get()->*func)(*temp_column, std::forward<Args>(args)...);
-    low_cardinality_column.insertFromFullColumn(*temp_column, 0);
+    (nested_serialization.get()->*func)(temp_column, std::forward<Args>(args)...);
+    low_cardinality_column.insertFromFullColumn(temp_column, 0);
 }
 
 template <typename... Params, typename... Args>
@@ -937,12 +960,12 @@ bool SerializationLowCardinality::tryDeserializeImpl(
     IColumn & column, SerializationLowCardinality::TryDeserializeFunctionPtr<Params...> func, Args &&... args) const
 {
     auto & low_cardinality_column = getColumnLowCardinality(column);
-    auto temp_column = low_cardinality_column.getDictionary().getNestedColumn()->cloneEmpty();
+    IColumn & temp_column = scratchColumnFor(*low_cardinality_column.getDictionary().getNestedColumn());
 
-    if (!(nested_serialization.get()->*func)(*temp_column, std::forward<Args>(args)...))
+    if (!(nested_serialization.get()->*func)(temp_column, std::forward<Args>(args)...))
         return false;
 
-    low_cardinality_column.insertFromFullColumn(*temp_column, 0);
+    low_cardinality_column.insertFromFullColumn(temp_column, 0);
     return true;
 }
 
