@@ -11,6 +11,11 @@ FROM ubuntu:22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8 TZ=UTC
+# jemalloc keeps freed pages for a minute instead of five seconds before returning them to
+# the kernel: under the platform's writes (7000 msg/s x 300 s, two cycles) inserts cost 59 s
+# of CPU against 62 and 61 with the stock decay, the rest of the string is the stock value.
+# The memory worker still purges when memory runs short.
+ENV MALLOC_CONF=percpu_arena:percpu,oversize_threshold:0,muzzy_decay_ms:0,dirty_decay_ms:60000
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates locales tzdata wget \

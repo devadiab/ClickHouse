@@ -18,6 +18,16 @@ Base: `v26.10.2.103-stable`.
 |---|---|---|
 | murasil3 (`4dbfb2e9…`, 2026-11-07) | 26.10.2.103 + selector patch + LowCardinality translation cache, ThinLTO, PGO on the platform's inserts, merges and page queries | Against murasil1 (selector patch, no PGO) on the bench pair, 7000 msg/s x 300 s, two cycles each: insert CPU 85/84 -> 61/63 s (-27%), merges of two or three parts 29/61 -> 0/0, merge CPU 125/119 -> 71/244 s (a 5-minute window catches merges unevenly; the repro above is the fair merge comparison). Page queries on the clone (`bench/replay.py`, 3 rounds, sum of medians): 6,897 -> 5,227 ms and 5,715 -> 4,788 ms (-24%, -16%), CPU 13,946 -> 12,035 and 12,792 -> 11,403 ms (-14%, -11%). Unit tests: 36 of the three touched suites pass on the dev build. |
 
+## Settings measured (2026-11-08, bench pair, 7000 msg/s x 300 s, murasil3, each twice alternating with the base)
+
+| Setting | Insert CPU (base 62 s, 61 s) | Merge CPU per merged row (base 0.94 us, 0.87 us) | Kept |
+|---|---|---|---|
+| jemalloc `dirty_decay_ms:60000` (stock 5000) | 59 s, 59 s | 0.91, 0.99 | Yes, `ENV MALLOC_CONF` in `murasil/docker/Dockerfile` |
+| `low_cardinality_use_single_dictionary_for_part = 1` | 62 s, 63 s | 1.05, 1.01 | No |
+| vertical merges for every part (`vertical_merge_algorithm_min_rows_to_activate = 1`, `_min_columns_to_activate = 1`) | 62 s, 62 s | 0.82, 0.80 | Yes, `config.d/10-merges.xml` |
+
+Merge CPU in a 5-minute window swings with which merges happen to land in it (54 to 185 s here), so merges compare per merged row. `bench/knobs_round2.sh` runs the round.
+
 ## Candidates
 
 Measured against the platform's own workload (the platform's

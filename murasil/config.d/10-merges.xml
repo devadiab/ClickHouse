@@ -18,5 +18,12 @@
     <merge_tree>
         <merge_selector_small_parts_min_count>30</merge_selector_small_parts_min_count>
         <merge_selector_base>10</merge_selector_base>
+        <!-- Every merge vertical, however small (the default asks for 131,072 rows and 11
+             columns): on the bench pair (7000 msg/s x 300 s, two cycles each, 2026-11-08)
+             merges cost 0.82 and 0.80 us of CPU per merged row against 0.94 and 0.87 with
+             the defaults, the same inserts and the same rows. The platform's tables are wide
+             and most merges are small. -->
+        <vertical_merge_algorithm_min_rows_to_activate>1</vertical_merge_algorithm_min_rows_to_activate>
+        <vertical_merge_algorithm_min_columns_to_activate>1</vertical_merge_algorithm_min_columns_to_activate>
     </merge_tree>
 </clickhouse>
