@@ -11,9 +11,11 @@ S=/private/tmp/claude-501/-Users-adiab-SMS-Platform-sms-platform/5c074344-c32d-4
 BOX=165.22.86.116; ch=$(cat $S/capacity/ch_ip); clone=$(cat $S/rehearsal/ip)
 OPTS=(-i "$HOME/.ssh/id_ed25519" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=10 -o LogLevel=ERROR)
 box() { ssh "${OPTS[@]}" root@$BOX "$@"; }
-out=$S/pgo/murasil4.txt; : > $out
+out=$S/pgo/murasil4.txt; [[ "${RESUME_FROM:-}" == merge ]] || : > $out
 say() { echo "== $* $(date -u +%H:%M)" >> $out; }
 
+# RESUME_FROM=merge skips the profiling runs and uses the writes.fdata and reads.fdata already on the hosts.
+if [[ "${RESUME_FROM:-}" != merge ]]; then
 say "stage the instrumented binary"
 box 'cd /work/bolt && zstd -T0 -3 -q -f clickhouse-inst -o clickhouse-inst.zst && ls -la clickhouse-inst.zst | cut -c1-80' >> $out 2>&1
 for h in $ch $clone; do
@@ -41,6 +43,8 @@ remote "$clone" "cd /opt/murasil && docker compose stop clickhouse >/dev/null 2>
 remote "$clone" "python3 /tmp/replay.py inst_warm $CH_USERNAME \"\$(cat /tmp/ch.pass)\" 1 $CH_DATABASE" >/dev/null 2>&1
 remote "$clone" "python3 /tmp/replay.py inst_r $CH_USERNAME \"\$(cat /tmp/ch.pass)\" 2 $CH_DATABASE" >/dev/null 2>&1
 remote "$clone" "cd /opt/murasil && bash settle_profile.sh bolt/prof.fdata bolt/reads.fdata && docker compose stop -t 300 clickhouse >/dev/null 2>&1; ls -la bolt | cut -c1-90" 2>&1 | grep -v "known hosts" >> $out
+
+fi
 
 say "merge and lay out on the box"
 box 'rm -rf /work/bolt/fdata && mkdir -p /work/bolt/fdata/w /work/bolt/fdata/r'
