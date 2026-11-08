@@ -13,6 +13,9 @@ OPTS=(-i "$HOME/.ssh/id_ed25519" -o StrictHostKeyChecking=accept-new -o UserKnow
 box() { ssh "${OPTS[@]}" root@$BOX "$@"; }
 out=$S/pgo/murasil4.txt; : > $out
 say() { echo "== $* $(date -u +%H:%M)" >> $out; }
+# The instrumented server rewrites its profile every minute; a copy is taken once the file has
+# been still for ten seconds, because the dump at exit was cut short by the container's stop.
+SETTLED='sleep 65; f=bolt/prof.fdata; until [ -s \$f ] && [ \$(( \$(date +%s) - \$(stat -c %Y \$f) )) -ge 10 ]; do sleep 2; done'
 
 say "stage the instrumented binary"
 box 'cd /work/bolt && zstd -T0 -3 -q -f clickhouse-inst -o clickhouse-inst.zst && ls -la clickhouse-inst.zst | cut -c1-80' >> $out 2>&1
@@ -33,25 +36,26 @@ done
 say "writes on the instrumented binary (capacity pair)"
 remote "$ch" "cd /opt/murasil && docker compose stop clickhouse >/dev/null 2>&1; docker compose -f compose.yml -f inst.yml up -d --wait 2>&1 | tail -1; sleep 20" 2>&1 | grep -v "known hosts" >> $out
 bash $FORK/murasil/bench/merge_ab.sh inst_w 7000 420 "" >> $out 2>&1
-remote "$ch" "cd /opt/murasil && sleep 70; ls -la bolt | cut -c1-90; docker compose stop clickhouse >/dev/null 2>&1; sleep 5; ls -la bolt | cut -c1-90" 2>&1 | grep -v "known hosts" >> $out
+remote "$ch" "cd /opt/murasil && $SETTLED && cp bolt/prof.fdata bolt/writes.fdata && docker compose stop -t 300 clickhouse >/dev/null 2>&1; ls -la bolt | cut -c1-90" 2>&1 | grep -v "known hosts" >> $out
 
 say "reads on the instrumented binary (clone)"
 remote "$clone" "cd /opt/murasil && docker compose stop clickhouse >/dev/null 2>&1; docker compose -f compose.yml -f inst.yml up -d --wait 2>&1 | tail -1; sleep 30" 2>&1 | grep -v "known hosts" >> $out
 remote "$clone" "python3 /tmp/replay.py inst_warm $CH_USERNAME \"\$(cat /tmp/ch.pass)\" 1 $CH_DATABASE" >/dev/null 2>&1
 remote "$clone" "python3 /tmp/replay.py inst_r $CH_USERNAME \"\$(cat /tmp/ch.pass)\" 2 $CH_DATABASE" >/dev/null 2>&1
-remote "$clone" "cd /opt/murasil && sleep 70; docker compose stop clickhouse >/dev/null 2>&1; sleep 5; ls -la bolt | cut -c1-90" 2>&1 | grep -v "known hosts" >> $out
+remote "$clone" "cd /opt/murasil && $SETTLED && cp bolt/prof.fdata bolt/reads.fdata && docker compose stop -t 300 clickhouse >/dev/null 2>&1; ls -la bolt | cut -c1-90" 2>&1 | grep -v "known hosts" >> $out
 
 say "merge and lay out on the box"
 box 'rm -rf /work/bolt/fdata && mkdir -p /work/bolt/fdata/w /work/bolt/fdata/r'
-scp -3 -q "${OPTS[@]}" "root@$ch:/opt/murasil/bolt/*.fdata" root@$BOX:/work/bolt/fdata/w/ 2>/dev/null
-scp -3 -q "${OPTS[@]}" "root@$clone:/opt/murasil/bolt/*.fdata" root@$BOX:/work/bolt/fdata/r/ 2>/dev/null
+scp -3 -q "${OPTS[@]}" "root@$ch:/opt/murasil/bolt/writes.fdata" root@$BOX:/work/bolt/fdata/w/ 2>/dev/null
+scp -3 -q "${OPTS[@]}" "root@$clone:/opt/murasil/bolt/reads.fdata" root@$BOX:/work/bolt/fdata/r/ 2>/dev/null
 box 'cd /work/bolt && ls -la fdata/w fdata/r | cut -c1-90 && docker run --rm -v /work:/work -w /work/bolt murasil/ch-toolchain bash -c "set -e
-merge-fdata-22 fdata/w/*.fdata fdata/r/*.fdata > merged.fdata && ls -la merged.fdata | cut -c1-80
+merge-fdata-22 \$(find fdata -name \"*.fdata\" -size +1M) > merged.fdata && ls -la merged.fdata | cut -c1-80
 llvm-bolt-22 clickhouse-relocs -o clickhouse-bolt -data=merged.fdata -reorder-blocks=ext-tsp -reorder-functions=cdsort -split-functions -split-all-cold -split-eh -dyno-stats -use-gnu-stack 2>&1 | grep -E \"BOLT-INFO: (dyno|[0-9]+ out of|[0-9.]+% of)|BOLT-WARNING|BOLT-ERROR\" | head -20
 llvm-strip-22 -o /work/out/clickhouse-bolt-stripped --strip-debug --remove-section=.comment --remove-section=.note clickhouse-bolt
 /work/out/clickhouse-bolt-stripped --version && sha256sum /work/out/clickhouse-bolt-stripped && zstd -T0 -3 -q -f /work/out/clickhouse-bolt-stripped -o /work/out/clickhouse-bolt-stripped.zst"' >> $out 2>&1
 
 say "stage murasil4"
+if ! box 'test -s /work/out/clickhouse-bolt-stripped.zst'; then echo "BOLT made no binary; nothing to stage" >> $out; echo BOLT_DONE >> $out; exit 1; fi
 scp -q "${OPTS[@]}" root@$BOX:/work/out/clickhouse-bolt-stripped.zst $FORK/murasil/out/clickhouse-murasil4.zst 2>/dev/null
 (cd $FORK/murasil/out && zstd -d -q -f clickhouse-murasil4.zst -o clickhouse-murasil4 && chmod 755 clickhouse-murasil4 && shasum -a 256 clickhouse-murasil4 | cut -c1-70) >> $out
 for h in $ch $clone; do
