@@ -10,7 +10,15 @@ label=$1; rate=$2; secs=$3; sql=${4:-}
 q() { remote "$ch" 'docker exec -i murasil_clickhouse sh -c "clickhouse-client --password \"\$CLICKHOUSE_PASSWORD\" --database bench_db --multiquery"' 2>&1 | grep -v "known hosts"; }
 [ -n "$sql" ] && printf '%s\n' "$sql" | q
 since=$(remote "$ch" "date -u +'%Y-%m-%d %H:%M:%S'" 2>/dev/null | tail -1)
-remote "$app" "cd /opt/murasil && docker compose exec -T app bin/sms_platform rpc 'Ops.Bench.run(rate: $rate, seconds: $secs, binds: 48, window: 800, settle: 30, flush_ms: 5000, write: true, out: \"/tmp/bench\"); IO.puts(:done)'" 2>&1 | grep -v "known hosts\|FALLBACK" | grep -E "report written|error" | cut -c1-120
+# The bench runs detached on the app host and is polled for its report, so a dropped
+# connection from here does not end it halfway.
+upload "$app" /opt/murasil/bench_run.sh "$FORK/murasil/bench/bench_run.sh"
+remote "$app" "bash /opt/murasil/bench_run.sh $rate $secs" 2>&1 | grep -v "known hosts"
+for _ in $(seq 1 $(( (secs + 240) / 15 ))); do
+  sleep 15
+  remote "$app" "test -f /tmp/bench_done" 2>/dev/null && break
+done
+remote "$app" "grep -E 'report written|error' /tmp/bench_run.log | cut -c1-120" 2>&1 | grep -v "known hosts"
 sleep 90
 until_=$(remote "$ch" "date -u +'%Y-%m-%d %H:%M:%S'" 2>/dev/null | tail -1)
 echo "== $label  $since .. $until_  ($sql)"
