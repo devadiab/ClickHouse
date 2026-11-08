@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# BOLT on top of PGO: the instrumented binary the box made (/work/bolt/clickhouse-inst) runs the
+# BOLT on top of PGO: the instrumented binary the box made (/work/bolt/clickhouse-inst, one profile
+# file rewritten every minute, so the server runs without its watchdog fork) runs the
 # platform's writes on the capacity pair and the page queries on the clone, its profile is merged
 # on the box, the relocatable binary is laid out from it (murasil4), and murasil4 is A/B'd against
 # the build it came from (murasil3) under the same writes and reads.
@@ -23,6 +24,8 @@ services:
     volumes:
       - /opt/murasil/clickhouse-inst:/usr/bin/clickhouse:ro
       - /opt/murasil/bolt:/bolt
+    environment:
+      CLICKHOUSE_WATCHDOG_ENABLE: "0"
 EOF
 echo staged $(hostname)' 2>&1 | grep -v "known hosts" >> $out
 done
