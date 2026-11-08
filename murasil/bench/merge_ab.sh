@@ -2,7 +2,7 @@
 # merge_ab.sh <label> <rate> <seconds> [SQL applied before the run]: the platform's write load
 # against the capacity ClickHouse, then what the merges and inserts cost in that window.
 set -uo pipefail
-REPO="/Users/adiab/SMS Platform/sms_platform"
+REPO="/Users/adiab/SMS Platform/sms_platform"; FORK=${FORK:-$HOME/Projects/clickhouse}
 source "$REPO/deploy/digitalocean/lib.sh"
 S=/private/tmp/claude-501/-Users-adiab-SMS-Platform-sms-platform/5c074344-c32d-415d-aec8-b9cd69438602/scratchpad
 ch=$(cat $S/capacity/ch_ip); app=$(cat $S/capacity/app_ip)
