@@ -13,14 +13,12 @@ OPTS=(-i "$HOME/.ssh/id_ed25519" -o StrictHostKeyChecking=accept-new -o UserKnow
 box() { ssh "${OPTS[@]}" root@$BOX "$@"; }
 out=$S/pgo/murasil4.txt; : > $out
 say() { echo "== $* $(date -u +%H:%M)" >> $out; }
-# The instrumented server rewrites its profile every minute; a copy is taken once the file has
-# been still for ten seconds, because the dump at exit was cut short by the container's stop.
-SETTLED='sleep 65; f=bolt/prof.fdata; until [ -s \$f ] && [ \$(( \$(date +%s) - \$(stat -c %Y \$f) )) -ge 10 ]; do sleep 2; done'
 
 say "stage the instrumented binary"
 box 'cd /work/bolt && zstd -T0 -3 -q -f clickhouse-inst -o clickhouse-inst.zst && ls -la clickhouse-inst.zst | cut -c1-80' >> $out 2>&1
 for h in $ch $clone; do
   scp -3 -q "${OPTS[@]}" root@$BOX:/work/bolt/clickhouse-inst.zst root@$h:/opt/murasil/clickhouse-inst.zst 2>/dev/null
+  upload $h /opt/murasil/settle_profile.sh $FORK/murasil/bench/settle_profile.sh
   remote $h 'cd /opt/murasil && zstd -d -q -f --rm clickhouse-inst.zst && chmod 755 clickhouse-inst && mkdir -p bolt && chmod 777 bolt && rm -f bolt/*.fdata && cat > inst.yml <<EOF
 services:
   clickhouse:
@@ -36,13 +34,13 @@ done
 say "writes on the instrumented binary (capacity pair)"
 remote "$ch" "cd /opt/murasil && docker compose stop clickhouse >/dev/null 2>&1; docker compose -f compose.yml -f inst.yml up -d --wait 2>&1 | tail -1; sleep 20" 2>&1 | grep -v "known hosts" >> $out
 bash $FORK/murasil/bench/merge_ab.sh inst_w 7000 420 "" >> $out 2>&1
-remote "$ch" "cd /opt/murasil && $SETTLED && cp bolt/prof.fdata bolt/writes.fdata && docker compose stop -t 300 clickhouse >/dev/null 2>&1; ls -la bolt | cut -c1-90" 2>&1 | grep -v "known hosts" >> $out
+remote "$ch" "cd /opt/murasil && bash settle_profile.sh bolt/prof.fdata bolt/writes.fdata && docker compose stop -t 300 clickhouse >/dev/null 2>&1; ls -la bolt | cut -c1-90" 2>&1 | grep -v "known hosts" >> $out
 
 say "reads on the instrumented binary (clone)"
 remote "$clone" "cd /opt/murasil && docker compose stop clickhouse >/dev/null 2>&1; docker compose -f compose.yml -f inst.yml up -d --wait 2>&1 | tail -1; sleep 30" 2>&1 | grep -v "known hosts" >> $out
 remote "$clone" "python3 /tmp/replay.py inst_warm $CH_USERNAME \"\$(cat /tmp/ch.pass)\" 1 $CH_DATABASE" >/dev/null 2>&1
 remote "$clone" "python3 /tmp/replay.py inst_r $CH_USERNAME \"\$(cat /tmp/ch.pass)\" 2 $CH_DATABASE" >/dev/null 2>&1
-remote "$clone" "cd /opt/murasil && $SETTLED && cp bolt/prof.fdata bolt/reads.fdata && docker compose stop -t 300 clickhouse >/dev/null 2>&1; ls -la bolt | cut -c1-90" 2>&1 | grep -v "known hosts" >> $out
+remote "$clone" "cd /opt/murasil && bash settle_profile.sh bolt/prof.fdata bolt/reads.fdata && docker compose stop -t 300 clickhouse >/dev/null 2>&1; ls -la bolt | cut -c1-90" 2>&1 | grep -v "known hosts" >> $out
 
 say "merge and lay out on the box"
 box 'rm -rf /work/bolt/fdata && mkdir -p /work/bolt/fdata/w /work/bolt/fdata/r'
